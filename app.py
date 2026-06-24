@@ -2,14 +2,12 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 from statsmodels.tsa.arima.model import ARIMA
 
-st.set_page_config(page_title="NIFTY 50 Analytics Dashboard", layout="wide")
+st.set_page_config(page_title="NIFTY 50 Dashboard", layout="wide")
 
-st.markdown("<h1 style='text-align:center;color:#1f77b4;'>📈 NIFTY 50 Analytics Dashboard</h1>", unsafe_allow_html=True)
-
-nifty50 = [
+NIFTY50 = [
 "ADANIPORTS.NS","ASIANPAINT.NS","AXISBANK.NS","BAJAJ-AUTO.NS","BAJFINANCE.NS",
 "BAJAJFINSV.NS","BEL.NS","BHARTIARTL.NS","CIPLA.NS","COALINDIA.NS",
 "DRREDDY.NS","EICHERMOT.NS","ETERNAL.NS","GRASIM.NS","HCLTECH.NS",
@@ -22,52 +20,49 @@ nifty50 = [
 "TRENT.NS","ULTRACEMCO.NS","WIPRO.NS","APOLLOHOSP.NS","BRITANNIA.NS"
 ]
 
-ticker = st.sidebar.selectbox("Select Company", nifty50)
+@st.cache_data(ttl=3600)
+def load_data(symbol):
+    return yf.download(symbol, period="5y", progress=False, auto_adjust=True)
 
-stock = yf.Ticker(ticker)
-info = stock.info
-hist = stock.history(period="5y")
+st.title("📈 NIFTY 50 Dashboard")
 
-current_price = info.get("currentPrice", "NA")
-market_cap = info.get("marketCap", "NA")
-pe_ratio = info.get("trailingPE", "NA")
-book_value = info.get("bookValue", "NA")
-dividend_yield = info.get("dividendYield", "NA")
-sector = info.get("sector", "NA")
+ticker = st.sidebar.selectbox("Select Stock", NIFTY50)
 
-col1,col2,col3,col4 = st.columns(4)
+try:
+    df = load_data(ticker)
 
-col1.metric("Current Price", f"₹{current_price}")
-col2.metric("Market Cap", f"{market_cap:,}")
-col3.metric("P/E Ratio", pe_ratio)
-col4.metric("Book Value", book_value)
+    if df.empty:
+        st.error("No data available.")
+        st.stop()
 
-col5,col6 = st.columns(2)
-col5.metric("Dividend Yield", dividend_yield)
-col6.metric("Sector", sector)
+    current_price = round(float(df["Close"].iloc[-1]),2)
+    high_52w = round(float(df["High"].max()),2)
+    low_52w = round(float(df["Low"].min()),2)
 
-st.subheader("5-Year Price Trend")
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Current Price", f"₹{current_price}")
+    c2.metric("5Y High", f"₹{high_52w}")
+    c3.metric("5Y Low", f"₹{low_52w}")
 
-fig, ax = plt.subplots(figsize=(12,5))
-ax.plot(hist.index, hist["Close"])
-ax.set_ylabel("Price")
-ax.set_xlabel("Date")
-st.pyplot(fig)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df.index,y=df["Close"],name="Close Price"))
+    fig.update_layout(height=500)
+    st.plotly_chart(fig,use_container_width=True)
 
-st.subheader("ARIMA Forecast")
+    close = df["Close"].dropna()
 
-close = hist["Close"].dropna()
-model = ARIMA(close, order=(5,1,0))
-fit = model.fit()
+    model = ARIMA(close,order=(5,1,0))
+    fitted = model.fit()
 
-forecast = fit.forecast(steps=12)
+    forecast = fitted.forecast(steps=12)
 
-forecast_df = pd.DataFrame({
-"Month": pd.date_range(close.index[-1], periods=13, freq="M")[1:],
-"Forecast Price": forecast.values
-})
+    forecast_df = pd.DataFrame({
+        "Month": pd.date_range(start=close.index[-1], periods=13, freq="ME")[1:],
+        "Forecast Price": forecast.values
+    })
 
-st.dataframe(forecast_df)
+    st.subheader("12-Month Forecast")
+    st.dataframe(forecast_df)
 
-st.subheader("Company Information")
-st.write(info)
+except Exception as e:
+    st.error(f"Error: {e}")
